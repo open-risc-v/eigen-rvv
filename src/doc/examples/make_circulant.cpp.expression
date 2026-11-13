@@ -1,0 +1,16 @@
+template <class ArgType>
+class Circulant : public Eigen::MatrixBase<Circulant<ArgType> > {
+ public:
+  Circulant(const ArgType& arg) : m_arg(arg) {
+    EIGEN_STATIC_ASSERT(ArgType::ColsAtCompileTime == 1, YOU_TRIED_CALLING_A_VECTOR_METHOD_ON_A_MATRIX);
+  }
+
+  using Nested = typename Eigen::internal::ref_selector<Circulant>::type;
+
+  using Index = Eigen::Index;
+  Index rows() const { return m_arg.rows(); }
+  Index cols() const { return m_arg.rows(); }
+
+  using ArgTypeNested = typename Eigen::internal::ref_selector<ArgType>::type;
+  ArgTypeNested m_arg;
+};
