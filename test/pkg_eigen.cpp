@@ -1,9 +1,12 @@
-/* eigen 探针：整数矩阵乘（逐位精确）+ 双精度矩阵乘（对 long double 参考校误差）。
-   整数路径用于跨架构逐字节比对；浮点路径输出最大相对误差供容差判定。 */
+/* eigen 探针：整数矩阵乘（逐位精确 + 标量参照定性）+ 双精度矩阵乘（对 long double 参考校误差）。
+   整数路径用于跨架构逐字节比对；浮点路径输出最大相对误差供容差判定。
+   计时写 stderr，stdout 的哈希行在两侧可比。 */
 #include <cstdio>
 #include <cstdint>
 #include <cmath>
+#include <cstdlib>
 #include <vector>
+#include <time.h>
 #include "Eigen/Dense"
 
 static unsigned long long fnv1a(const void *buf, size_t n)
@@ -14,9 +17,18 @@ static unsigned long long fnv1a(const void *buf, size_t n)
 	return h;
 }
 
+static double now_ms(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6;
+}
+
 int main(int argc, char **argv)
 {
-	if (argc < 2) { std::fprintf(stderr, "usage: %s <out.bin>\n", argv[0]); return 2; }
+	if (argc < 2) { std::fprintf(stderr, "usage: %s <out.bin> [reps]\n", argv[0]); return 2; }
+	int reps = argc > 2 ? std::atoi(argv[2]) : 1;
+	if (reps < 1) reps = 1;
 	FILE *f = std::fopen(argv[1], "wb");
 	if (!f) { std::perror("fopen"); return 2; }
 
@@ -28,8 +40,24 @@ int main(int argc, char **argv)
 			B(i, j) = (i * 11 - j * 5) % 89 - 44;
 		}
 	C = A * B;
+
+	// 标量参照：定性用（mismatch 数与首个差异位置）
+	int bad = 0, first_i = -1, first_j = -1, first_got = 0, first_ref = 0;
+	for (int i = 0; i < 64; i++)
+		for (int j = 0; j < 64; j++) {
+			int ref = 0;
+			for (int k = 0; k < 64; k++) ref += A(i, k) * B(k, j);
+			if (ref != C(i, j)) {
+				bad++;
+				if (first_i < 0) { first_i = i; first_j = j; first_got = C(i, j); first_ref = ref; }
+			}
+		}
+
 	std::fwrite(C.data(), sizeof(int), (size_t)C.size(), f);
-	std::printf("imatmul 64x64 fnv=%016llx\n", fnv1a(C.data(), sizeof(int) * (size_t)C.size()));
+	std::printf("imatmul 64x64 fnv=%016llx mismatch=%d/%d",
+	            fnv1a(C.data(), sizeof(int) * (size_t)C.size()), bad, 64 * 64);
+	if (bad) std::printf(" first=(%d,%d) got=%d ref=%d", first_i, first_j, first_got, first_ref);
+	std::printf("\n");
 
 	// 2) 双精度 128x128：X*X^T，与 long double 参考比相对误差
 	const int N = 128;
@@ -56,6 +84,17 @@ int main(int argc, char **argv)
 	std::fwrite(q.data(), sizeof(double), q.size(), f);
 	std::printf("dmatmul 128x128 max_rel=%.3e fnv=%016llx\n", max_rel,
 	            fnv1a(q.data(), sizeof(double) * q.size()));
+
+	// 3) 计时（best-of-reps）
+	Eigen::Matrix<int, 64, 64> C2;
+	double bi = 1e18, bd = 1e18;
+	for (int r = 0; r < reps; r++) {
+		double t0 = now_ms(); C2 = A * B; double t1 = now_ms();
+		if (t1 - t0 < bi) bi = t1 - t0;
+		t0 = now_ms(); G = X * X.transpose(); t1 = now_ms();
+		if (t1 - t0 < bd) bd = t1 - t0;
+	}
+	std::fprintf(stderr, "imatmul64_ms=%.3f dmatmul128_ms=%.3f\n", bi, bd);
 
 	std::fclose(f);
 	return (max_rel < 1e-12) ? 0 : 1;
