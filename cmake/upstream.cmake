@@ -14,7 +14,7 @@ add_executable(eigen_harness test/pkg_eigen.cpp)
 if(HAVE_PKG_TARGET)
   add_dependencies(eigen_harness pkg)
 endif()
-target_include_directories(eigen_harness PRIVATE "${PKG_PREFIX}/include")
+target_include_directories(eigen_harness PRIVATE "${PKG_PREFIX}/include" "${PKG_PREFIX}/include/eigen3")
 target_compile_options(eigen_harness PRIVATE ${RVV_FLAGS})
 target_link_libraries(eigen_harness PRIVATE m)
 
