@@ -30,3 +30,17 @@
 - [ ] 无 RVV 目标上的 dispatch 回退（`qemu-riscv64 -cpu rv64` 无 v 扩展）
 - [ ] VLEN 128 / 256 / 512 三档毒化
 - [ ] `-march` 不含 `zvl*` 时行为一致
+
+## 真机 A/B 复跑与后端真相（2026-11-25）
+
+门禁入口本来就是 `test/cases/01_eigen.sh` → `$BIN/eigen_harness`，板子上直接可用：
+
+```
+cmake -S . -B build/ab-a -DSRC_DIR=$PWD/src -D_USE_RVV=ON -DRVV_MARCH=rv64gcv
+cmake -S . -B build/ab-b -DSRC_DIR=$PWD/src -D_USE_RVV=OFF          # 同一份头，只切 -march
+RVV_A=$PWD/build/ab-a RVV_B=$PWD/build/ab-b bash test/run_ab.sh
+```
+
+结果 `PASS 00_framework`、`PASS 01_eigen`（整数 64 阶矩阵乘逐位一致，双精度 128 阶在容差内一致）。
+
+**但这不算 Eigen 自己的 RVV 后端跑起来了**。`Eigen/src/Core/util/ConfigureVectorization.h:532` 要求显式定义 `EIGEN_RISCV64_USE_RVV10`，而打开后又硬性要求 `__riscv_v_fixed_vlen`（即 `-mrvv-vector-bits=zvl`），否则 `#error`；gcc 15.2 不支持 `-mrvv-vector-bits`。所以当前 A/B 的差别只是 GCC 对 Eigen 标量循环的自动向量化。要让 Eigen 的 RVV10 内核真正生效，得换支持固定 VLEN 的编译器（clang 或更高版本 gcc），这条在 gcc 15.2 上走不通。
